@@ -1,0 +1,14 @@
+{
+	"github": {
+		"repo": "unRob/meethub",
+		"folder": "(por default 'eventos') test/eventos",
+		"hook": {
+			"secret": "",
+			"path": "/push"
+		}
+
+	},
+	"meetup": {
+		"key": ""
+	}
+}

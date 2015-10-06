@@ -1,0 +1,36 @@
+{
+  "name": "meethub",
+  "version": "0.0.1",
+  "description": "A bridge from github webhooks to meetup events",
+  "main": "index.js",
+  "scripts": {
+    "test": "tape 'test/*.js'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:unRob/meethub.git"
+  },
+  "keywords": [
+    "github",
+    "meetup"
+  ],
+  "author": "Rob Hidalgo <un@rob.mx>",
+  "license": "Patito, WTFPL",
+  "bugs": {
+    "url": "https://github.com/unRob/meethub/issues"
+  },
+  "homepage": "https://github.com/unRob/meethub",
+  "dependencies": {
+    "github-webhook-handler": "^0.5.0",
+    "js-yaml": "^3.4.2",
+    "lodash": "^3.10.1",
+    "marked": "^0.3.5",
+    "meetup-api": "^0.1.29",
+    "moment": "^2.10.6",
+    "octonode": "^0.7.1",
+    "underscore": "^1.8.3"
+  },
+  "devDependencies": {
+    "tape": "^4.2.1"
+  }
+}
