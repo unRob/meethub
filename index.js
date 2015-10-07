@@ -78,7 +78,7 @@ webhook.on('push', function (event) {
   var of_events = starts_with(folder);
 
   var filter_events = function (evts, commit) {
-    if (commit.committer.email !== 'meethub@rob.mx') {
+    if (commit.committer.email !== 'meethub@rob.mx' && commit.message.indexOf('X-meethub-skip') !== -1) {
       var files = commit.modified.concat(commit.added);
       return _.union(evts, files.filter(of_events));
     }
