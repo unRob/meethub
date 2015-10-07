@@ -27,11 +27,11 @@
     "marked": "^0.3.5",
     "meetup-api": "^0.1.29",
     "moment": "^2.10.6",
-    "octonode": "^0.7.1",
-    "querystring": "^0.2.0",
-    "underscore": "^1.8.3"
+    "octonode": "^0.7.1"
   },
   "devDependencies": {
+    "blue-tape": "^0.1.10",
+    "tap-colorize": "^1.2.0",
     "tape": "^4.2.1"
   }
 }
