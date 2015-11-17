@@ -1,29 +1,11 @@
-var http = require('http');
-var fs = require('fs');
-var Evento = require('./lib/evento.js');
-var _ = require('lodash');
-var qs = require('querystring');
-var url = require('url');
-
-var cfg = JSON.parse(fs.readFileSync('config.json'));
-
-// var content = 'https://api.github.com/repos/javascriptmx/chelajs/contents/eventos';
-var meetup = require('meetup-api')(cfg.meetup.credentials);
-var webhook = require('github-webhook-handler')(cfg.github.hook);
-var github = require('octonode');
-Evento.configure(cfg.meetup.defaults);
-
-var auth_url = github.auth.config(cfg.github.credentials).login(['repo']);
-
-
-http.ServerResponse.prototype.json = function (message, code) {
-  if (code){
-    this.statusCode = code;
-  }
-  this.setHeader('Content-type', 'application/json');
-  this.write(JSON.stringify(message));
-  this.end();
-};
+var http = require('http'),
+    fs = require('fs'),
+    _ = require('lodash'),
+    qs = require('querystring'),
+    url = require('url'),
+    EventEmitter = require('events'),
+    util = require('util'),
+    github = require('octonode');
 
 var starts_with = function (string) {
   return function (item) {
@@ -31,82 +13,155 @@ var starts_with = function (string) {
   };
 };
 
-var github_client = function () {
-  return github.client(cfg.github.access_token);
+var Meethub = function(cfg, helper) {
+  EventEmitter.call(this);
+  this.config = cfg;
+  this.meetup = require('meetup-api')(cfg.meetup.credentials);
+  this.webhook = require('github-webhook-handler')(cfg.github.hook);
+  this.github = github.client(cfg.github.token);
+  Meethub.Event.configure(cfg.meetup.defaults);
+  this.helper = helper;
+  this.setup();
+};
+util.inherits(Meethub, EventEmitter);
+
+Meethub.Event = require('./lib/evento.js');
+
+Meethub.prototype.fetch = function (path) {
+  var cfg = this.config;
+  return new Promise(function(resolve, rejejct){
+    client.repo(cfg.github.repo).contents(path, function(err, file){
+      if (err) {
+        reject(err);
+      } else {
+        var metadata = {
+          sha: file.sha,
+          repo: cfg.github.repo,
+          path: file.path
+        };
+        resolve(new Buffer(file.content, 'base64'), metadata);
+      }
+    });
+  });
 };
 
+Meethub.prototype.publish = function (event) {
+  var self = this;
+  return new Promise(function(resolve, reject){
+    var action = event.meetup_id ? 'editEvent' : 'postEvent';
+    var created = false;
 
-http.createServer(function (req, res) {
-  webhook(req, res, function (err) {
-    if (!err) {
-      var uri = url.parse(req.url);
-
-      if (uri.pathname.indexOf('/auth/github') === 0 && !cfg.github.access_token) {
-        switch (uri.pathname) {
-
-          case '/auth/github':
-            res.writeHead(302, {'Content-Type': 'text/plain', 'Location': auth_url});
-            res.end('Redirecting to ' + auth_url);
-          break;
-
-          case '/auth/github/callback':
-            var values = qs.parse(uri.query);
-            github.auth.login(values.code, function (err, token) {
-              res.json(token);
-            });
-          break;
-
-        }
+    var description = self.parser.description ? self.parser.description(event) : event.description;
+    self.meetup[action](event.to_meetup(description), function(err, res){
+      if (err) {
+        reject(err);
       } else {
-        res.json({"error": "Not found"}, 404);
+        if (action == 'postEvent') {
+          created = true;
+          event.setId(res.id);
+        }
+        resolve(created);
       }
-    }
+    });
   });
-}).listen(cfg.port);
+};
 
-
-webhook.on('error', function (err) {
-  console.error('Error:', err.message);
-});
-
-
-webhook.on('push', function (event) {
-  var pl = event.payload;
-  console.log('PUSH %s@%s', pl.repository.full_name, pl.after.substring(0,5));
-
-  var folder = cfg.github.folder || "eventos";
-  var of_events = starts_with(folder);
-
-  var filter_events = function (evts, commit) {
-    if (commit.committer.email !== 'meethub@rob.mx' && commit.message.indexOf('X-meethub-skip') !== -1) {
-      var files = commit.modified.concat(commit.added);
-      return _.union(evts, files.filter(of_events));
+Meethub.prototype.store = function (event) {
+  var self = this;
+  var endpoint = event.url(true);
+  var opts = {
+    path: event.metadata.path,
+    message: 'x-meethub-commit',
+    content: new Buffer(event.contents).toString('base64'),
+    sha: event.metadata.sha,
+    committer: {
+      name: "Meethub Bot",
+      email: "meethub@rob.mx"
     }
   };
 
-  pl.commits.reduce(filter_events, [])
-  .forEach(function (path) {
-
-    Evento.fetch(cfg.github.repo, path, github_client())
-    .then(function (evento, metadata) {
-      evento.publish(meetup)
-      .then(function (created) {
-        console.log("Event <"+evento.id+"> successfully "+(created ? 'created' : 'modified'));
-        if (created) {
-          evento.save(github_client())
-            .then(function () { console.log("Event file successfully saved to Github"); })
-            .catch(function (err) { console.error("Could not save event file to Github"); });
-        }
-      })
-      .catch(function (err, created) {
-        console.error("The event could not be "+(created ? 'created' : 'modified'));
-      });
-    })
-    .catch(function (err) {
-      console.error("Could not fetch event from github at "+file.path);
-      console.log(err);
+  return new Promise(function(resolve, reject){
+    self.github.put(endpoint, opts, function(err, status, body, headers){
+      if (err) {
+        reject(err);
+      } else {
+        resolve(body);
+      }
     });
+  });
+};
 
+Meethub.prototype.setup = function () {
+  if (this._setup) {
+    return false;
+  }
+
+  this._setup = true;
+  var self = this;
+  var cfg = this.config;
+
+  this.webhook.on('error', function (err) {
+    console.error('Error:', err.message);
   });
 
-});
+  this.webhook.on('push', function (event) {
+    var pl = event.payload;
+    console.log('PUSH %s@%s', pl.repository.full_name, pl.after.substring(0,5));
+
+    var folder = cfg.github.folder || "eventos";
+    var of_events = starts_with(folder);
+
+    var filter_events = function (evts, commit) {
+      if (commit.committer.email !== 'meethub@rob.mx' && commit.message.indexOf('X-meethub-skip') !== -1) {
+        var files = commit.modified.concat(commit.added);
+        return _.union(evts, files.filter(of_events));
+      }
+    };
+
+    pl.commits.reduce(filter_events, [])
+    .forEach(function (path) {
+
+      got_contents = self.fetch(path);
+      got_contents.then(function (contents, metadata) {
+        var data = self.parser.unserialize(contents);
+        data.metadata = contents;
+        var evt = new Meethub.Event(contents, metadata);
+        if (!evt.skip) {
+          self.publish(evt).then(function (created){
+            if (created) {
+              var stored = self.store(evt)
+              stored.then(function () {
+                self.emit('created', evt);
+              });
+              stored.catch(function (err) {
+                self.emit('error', err);
+              });
+            } else {
+              self.emit('updated', evt);
+            }
+          })
+          .catch(function (err){
+            self.emit('error', err);
+          });
+        }
+      });
+      got_contents.catch(function (err) {
+        console.error("Could not fetch event from github at "+file.path);
+        console.log(err);
+      });
+    }); //foreach
+  }); //on: push
+};
+
+
+Meethub.prototype.handler = function (req, res, next) {
+  switch (req.path.split('/')[1]) {
+    case 'github':
+      webhook(req, res, function(){
+        res.status(400).json({'error': 'Not found'});
+      });
+      break;
+  }
+};
+
+module.exports = Meethub;
