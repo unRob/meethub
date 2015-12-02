@@ -4,6 +4,7 @@ var http = require('http'),
     qs = require('querystring'),
     url = require('url'),
     EventEmitter = require('events'),
+    meetup = require('meetup-api'),
     util = require('util'),
     github = require('octonode');
 
@@ -13,14 +14,13 @@ var starts_with = function (string) {
   };
 };
 
-var Meethub = function(cfg, helper) {
+var Meethub = function(cfg) {
   EventEmitter.call(this);
   this.config = cfg;
-  this.meetup = require('meetup-api')(cfg.meetup.credentials);
+  this.meetup = meetup(cfg.meetup.credentials);
   this.webhook = require('github-webhook-handler')(cfg.github.hook);
   this.github = github.client(cfg.github.token);
   Meethub.Event.configure(cfg.meetup.defaults);
-  this.helper = helper;
   this.setup();
 };
 util.inherits(Meethub, EventEmitter);
@@ -126,10 +126,10 @@ Meethub.prototype.setup = function () {
         var data = self.parser.unserialize(contents);
         data.metadata = contents;
         var evt = new Meethub.Event(contents, metadata);
-        if (!evt.skip) {
+        if (!evt.private) {
           self.publish(evt).then(function (created){
             if (created) {
-              var stored = self.store(evt)
+              var stored = self.store(evt);
               stored.then(function () {
                 self.emit('created', evt);
               });
@@ -143,8 +143,11 @@ Meethub.prototype.setup = function () {
           .catch(function (err){
             self.emit('error', err);
           });
+        } else {
+          self.emit('private', evt);
         }
       });
+
       got_contents.catch(function (err) {
         console.error("Could not fetch event from github at "+file.path);
         console.log(err);
